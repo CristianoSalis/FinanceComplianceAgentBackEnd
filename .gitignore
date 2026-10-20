@@ -1,0 +1,18 @@
+## Build and output binaries
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+## User-specific files
+*.user
+*.userosscache
+*.sln.docstates
+
+## Visual Studio / VS Code folders
+.vs/
+.vscode/
+.idea/
+
+## Sensitive settings (opzionale se vuoi ignorare totalmente appsettings.Development.json)
+appsettings.Development.json
