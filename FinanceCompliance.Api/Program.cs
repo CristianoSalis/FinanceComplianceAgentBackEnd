@@ -9,6 +9,7 @@ builder.Services.AddDbContext<ComplianceDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddScoped<ComplianceAiService>();
+builder.Services.AddScoped<RagEvaluationService>();
 builder.Services.AddSingleton<PolicyVectorService>();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

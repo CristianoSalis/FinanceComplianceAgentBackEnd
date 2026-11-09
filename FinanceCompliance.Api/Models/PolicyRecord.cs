@@ -17,7 +17,7 @@ namespace FinanceCompliance.Api.Models
         public string Category { get; set; } = string.Empty;
 
         //Vector dimension (e.g., 1536 for OpenAI or embedding models)
-        [VectorStoreVector(1536)]
+        [VectorStoreVector(768)]
         public ReadOnlyMemory<float>? Vector { get; set; }
     }
 }

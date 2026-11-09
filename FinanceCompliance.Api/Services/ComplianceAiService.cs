@@ -1,7 +1,9 @@
 ﻿using FinanceCompliance.Api.Data;
+using FinanceCompliance.Api.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
+using System.Text.Json;
 
 namespace FinanceCompliance.Api.Services
 {
@@ -55,15 +57,17 @@ namespace FinanceCompliance.Api.Services
             _kernel = builder.Build();
         }
 
-        public async Task<string> AnalyzeTransactionsAsync()
+        public async Task<RagPipelineResult> AnalyzeTransactionsAsync()
         {
             //SQL Server
             var rules = await _context.ComplianceRules.Where(r => r.IsActive).ToListAsync();
             var pendingTransactions = await _context.FinancialTransactions.Where(t => t.Status == "Pending").ToListAsync();
 
             // RAG: Qdrant for policy
-            var relevantPolicies = await _vectorService.SearchRelevantPoliciesAsync("Verifica transazioni sospette, limiti e giurisdizioni estere");
-            var policiesText = string.Join("\n", relevantPolicies.Select(p => $"- {p}"));
+            const string question = "Verifica transazioni sospette, limiti e giurisdizioni estere";
+            var relevantPolicies = await _vectorService.SearchRelevantPoliciesAsync(question);
+            var policiesText = string.Join("\n", relevantPolicies.Select((p, index) =>
+                $"[CONTEXT-{index + 1} | file={p.FileName} | chunk={p.ChunkIndex} | score={p.Score:F3}]\n{p.Content}"));
 
             var rulesText = string.Join("\n", rules.Select(r => $"- [{r.RuleCode}] {r.Description} (Soglia: {r.MaxThreshold})"));
             var transactionsText = string.Join("\n", pendingTransactions.Select(t =>
@@ -83,7 +87,23 @@ REGOLE AZIENDALI (SQL Server):
 TRANSAZIONI DA ANALIZZARE:
 {transactionsText}
 
-Per ogni transazione, verifica se viola una regola o una policy. Restituisci un'analisi strutturata indicando chiaramente se la transazione è 'Conforme' o 'Anomala/Da Bloccare' e spiega la motivazione in italiano citando la fonte esatta.
+             Per ogni transazione, verifica se viola una regola o una policy. Restituisci esclusivamente JSON valido, senza markdown e senza testo aggiuntivo, con questa struttura:
+             {{
+               ""transactions"": [
+                 {{
+                   ""transactionId"": 123,
+                   ""classification"": ""Conforme oppure Anomala/Da Bloccare"",
+                   ""reason"": ""Motivazione in italiano"",
+                   ""citations"": [
+                     {{
+                       ""contextId"": ""CONTEXT-1"",
+                       ""quote"": ""Citazione testuale breve presa dal contesto""
+                     }}
+                   ]
+                 }}
+               ]
+             }}
+             Usa esclusivamente gli identificativi CONTEXT-n presenti nel contesto. Se non hai elementi sufficienti, dichiaralo nella motivazione e non inventare citazioni.
 ";
 
             // Logs
@@ -105,7 +125,62 @@ Per ogni transazione, verifica se viola una regola o una policy. Restituisci un'
             //OLLAMA (POST /v1/chat/completions sulla porta 11434)
             var result = await chatService.GetChatMessageContentAsync(chatHistory);
 
-            return result.Content ?? "Nessuna risposta generata dall'agente.";
+            var answer = result.Content ?? "Nessuna risposta generata dall'agente.";
+
+            ComplianceAnalysisResult analysis;
+            try
+            {
+                var json = ExtractJson(answer);
+                var parsedAnalysis = JsonSerializer.Deserialize<ComplianceAnalysisResult>(
+                    json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                analysis = parsedAnalysis is null
+                    ? CreateUnstructuredAnalysis(answer)
+                    : new ComplianceAnalysisResult
+                    {
+                        Transactions = parsedAnalysis.Transactions,
+                        IsStructured = true
+                    };
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "La risposta del modello non è un JSON valido.");
+                analysis = CreateUnstructuredAnalysis(answer);
+            }
+
+            return new RagPipelineResult
+            {
+                Question = question,
+                Contexts = relevantPolicies,
+                Analysis = analysis,
+                Answer = answer
+            };
+        }
+
+        private static ComplianceAnalysisResult CreateUnstructuredAnalysis(string answer)
+        {
+            return new ComplianceAnalysisResult
+            {
+                IsStructured = false,
+                RawResponse = answer
+            };
+        }
+
+        private static string ExtractJson(string responseText)
+        {
+            var json = responseText.Trim();
+            if (json.StartsWith("```", StringComparison.Ordinal))
+            {
+                var firstLineEnd = json.IndexOf('\n');
+                var lastFence = json.LastIndexOf("```");
+                if (firstLineEnd >= 0 && lastFence > firstLineEnd)
+                {
+                    json = json[(firstLineEnd + 1)..lastFence].Trim();
+                }
+            }
+
+            return json;
         }
     }
 }

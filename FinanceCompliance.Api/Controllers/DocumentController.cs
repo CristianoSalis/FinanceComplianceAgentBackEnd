@@ -44,11 +44,11 @@ namespace FinanceCompliance.Api.Controllers
 
                 var filePath = Path.Combine(folderPath, file.FileName);
 
-                //Saving file on server
+                /*//Saving file on server
                 using (var stream = new StreamWriter(filePath)) 
                 {
                     // Standard asynchronous saving
-                }
+                }*/
 
                 // Using the correct FileStream:
                 using (var stream = new FileStream(filePath, FileMode.Create))

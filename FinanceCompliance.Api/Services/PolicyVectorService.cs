@@ -178,7 +178,7 @@ namespace FinanceCompliance.Api.Services
                     chunks.Add(chunk);
                 }
 
-                // Avanziamo nell'indice (con un piccolo overlap di 50 caratteri opzionale per continuità)
+                //index
                 index += length;
             }
 
@@ -186,7 +186,7 @@ namespace FinanceCompliance.Api.Services
         } 
 
 
-        public async Task<List<string>> SearchRelevantPoliciesAsync(string queryText)
+        public async Task<List<RetrievedContext>> SearchRelevantPoliciesAsync(string queryText)
         {
             Console.WriteLine($"[QDRANT RAG SEARCH] Ricerca semantica avviata per: '{queryText}'");
 
@@ -215,21 +215,40 @@ namespace FinanceCompliance.Api.Services
                     limit: 3
                 );
 
-                var relevantPolicies = new List<string>();
+                var relevantPolicies = new List<RetrievedContext>();
 
                 foreach (var hit in searchResults)
                 {
                     // Estraiamo il testo originale salvato nel Payload durante l'ingestion
-                    Console.WriteLine($"[DEBUG] Chunk trovato con Score: {hit.Score} da file: {hit.Payload["file_name"]}");
+                    var fileName = hit.Payload.TryGetValue("file_name", out var fileValue)
+                        ? fileValue.StringValue
+                        : string.Empty;
+                    var chunkIndex = hit.Payload.TryGetValue("chunk_index", out var chunkValue)
+                        ? chunkValue.IntegerValue
+                        : 0;
+
+                    Console.WriteLine($"[DEBUG] Chunk trovato con Score: {hit.Score} da file: {fileName}");
                     if (hit.Payload.TryGetValue("content", out var contentValue))
                     {
-                        relevantPolicies.Add(contentValue.StringValue);
+                        relevantPolicies.Add(new RetrievedContext
+                        {
+                            Content = contentValue.StringValue,
+                            FileName = fileName,
+                            ChunkIndex = (int)chunkIndex,
+                            Score = hit.Score
+                        });
                     }
                 }
 
                 if (relevantPolicies.Count == 0)
                 {
-                    relevantPolicies.Add("Nessuna policy specifica trovata nel database vettoriale per questa richiesta.");
+                    relevantPolicies.Add(new RetrievedContext
+                    {
+                        Content = "Nessuna policy specifica trovata nel database vettoriale per questa richiesta.",
+                        FileName = "Nessun documento",
+                        ChunkIndex = 0,
+                        Score = 0
+                    });
                 }
 
                 Console.WriteLine($"[QDRANT RAG SEARCH] Trovati {relevantPolicies.Count} chunk pertinenti via Cosine Similarity..");
@@ -238,7 +257,16 @@ namespace FinanceCompliance.Api.Services
             catch (Exception ex)
             {
                 Console.WriteLine($"[QDRANT SEARCH ERROR] Errore durante la ricerca su Qdrant: {ex.Message}");
-                return new List<string> { "Errore nel recupero delle policy di sicurezza." };
+                return new List<RetrievedContext>
+                {
+                    new RetrievedContext
+                    {
+                        Content = "Errore nel recupero delle policy di sicurezza.",
+                        FileName = "Errore retrieval",
+                        ChunkIndex = 0,
+                        Score = 0
+                    }
+                };
             }
         }
 

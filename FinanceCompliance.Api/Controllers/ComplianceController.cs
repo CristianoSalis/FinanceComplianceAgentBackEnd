@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using FinanceCompliance.Api.Models;
 using FinanceCompliance.Api.Services;
 
 namespace FinanceCompliance.Api.Controllers
@@ -8,20 +9,41 @@ namespace FinanceCompliance.Api.Controllers
     public class ComplianceController : ControllerBase
     {
         private readonly ComplianceAiService _aiService;
+        private readonly RagEvaluationService _evaluationService;
 
-        public ComplianceController(ComplianceAiService aiService)
+        public ComplianceController(
+            ComplianceAiService aiService,
+            RagEvaluationService evaluationService)
         {
             _aiService = aiService;
+            _evaluationService = evaluationService;
         }
 
         // POST: api/compliance/analyze
         [HttpPost("analyze")]
-        public async Task<IActionResult> RunComplianceAnalysis()
+        public async Task<IActionResult> RunComplianceAnalysis([FromQuery] bool evaluate = false)
         {
             try
             {
-                var analysisResult = await _aiService.AnalyzeTransactionsAsync();
-                return Ok(new { success = true, analysis = analysisResult });
+                var pipelineResult = await _aiService.AnalyzeTransactionsAsync();
+                RagEvaluationResult? evaluation = null;
+
+                if (evaluate)
+                {
+                    evaluation = await _evaluationService.EvaluateAsync(new RagEvaluationRequest
+                    {
+                        Question = pipelineResult.Question,
+                        Contexts = pipelineResult.Contexts,
+                        Answer = pipelineResult.Answer
+                    });
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    analysis = pipelineResult,
+                    evaluation
+                });
             }
             catch (Exception ex)
             {
